@@ -30,8 +30,8 @@ Khóa luận tốt nghiệp - Khoa Công nghệ Thông tin, Trường Đại h�
 2. Chạy lần lượt các ô sau:
 
 ```python
-!git clone https://github.com/TEN_TAI_KHOAN/TEN_REPO.git
-%cd TEN_REPO
+!git clone https://github.com/liemdang961-cell/semcom-gnn.git
+%cd semcom-gnn
 !pip install -r requirements.txt -q
 !python gradio_app.py
 ```
