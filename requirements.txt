@@ -1,0 +1,7 @@
+torch
+torch_geometric
+sentence-transformers
+datasets
+gradio
+networkx
+matplotlib
