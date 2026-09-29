@@ -10,14 +10,18 @@ Khóa luận tốt nghiệp - Khoa Công nghệ Thông tin, Trường Đại h�
 |---|---|
 | `graph_builder.py` | Chuyển bộ ba (chủ thể, quan hệ, khách thể) của WebNLG thành đồ thị PyTorch Geometric |
 | `semantic_encoder.py` | Semantic Encoder dùng GAT có kết hợp đặc trưng cạnh, xuất vector 128 chiều |
-| `gradio_app.py` | Giao diện demo: nhập bộ ba, xem đồ thị và vector ngữ nghĩa |
+| `channel.py` | Mô phỏng kênh truyền AWGN |
+| `decoder.py` | Semantic Decoder (Node Classifier + Relation Classifier) |
+| `gradio_app.py` | Giao diện demo: Encoder → Channel → Decoder, xem đồ thị gốc và đồ thị khôi phục |
+| `train.py` | Vòng lặp huấn luyện Encoder + Decoder trên bộ ba WebNLG, lưu checkpoint |
 | `requirements.txt` | Danh sách thư viện cần cài |
 
 ## Tiến độ
 
 - [x] Tuần 4: Semantic Encoder (GAT) và giao diện demo
-- [ ] Tuần 5: Kênh truyền AWGN
-- [ ] Tuần 6: Đánh giá theo nhiều mức SNR
+- [x] Tuần 5: Kênh truyền AWGN + kiến trúc Semantic Decoder (chưa huấn luyện)
+- [x] Tuần 5 (tiếp): Vòng lặp huấn luyện đầu tiên (train.py)
+- [ ] Tuần 6: Đánh giá theo nhiều mức SNR trên mô hình đã huấn luyện
 - [ ] Tuần 7-8: Mô hình đe dọa và tấn công đối kháng
 - [ ] Tuần 9: Adversarial Training
 - [ ] Tuần 10-12: Tối ưu, viết báo cáo
@@ -30,8 +34,8 @@ Khóa luận tốt nghiệp - Khoa Công nghệ Thông tin, Trường Đại h�
 2. Chạy lần lượt các ô sau:
 
 ```python
-!git clone https://github.com/liemdang961-cell/semcom-gnn.git
-%cd semcom-gnn
+!git clone https://github.com/TEN_TAI_KHOAN/TEN_REPO.git
+%cd TEN_REPO
 !pip install -r requirements.txt -q
 !python gradio_app.py
 ```

@@ -1,13 +1,13 @@
 """
-Tuan 4 - Giao dien demo cho Semantic Encoder (chua huan luyen).
+Giao dien demo - tich hop Encoder (tuan 4) + Kenh AWGN + Decoder (tuan 5).
 
-Muc dich: nhap cac bo ba (dinh dang WebNLG) -> xem do thi tri thuc duoc
-tao ra -> xem vector ngu nghia 128 chieu do GAT encoder sinh ra.
+Luong chay: nhap bo ba -> graph_builder -> semantic_encoder -> channel (AWGN)
+-> decoder -> hien do thi goc va do thi "khoi phuc duoc".
 
-LUU Y QUAN TRONG: encoder trong file nay CHUA duoc huan luyen (do la
-viec cua cac tuan sau, khi co Channel + Decoder + vong lap train). Vi
-vay cac con so trong vector chi de kiem tra pipeline chay dung, KHONG
-phai ket qua khoa hoc that. Ket qua that se co sau khi huan luyen.
+LUU Y QUAN TRONG: encoder VA decoder o day CHUA duoc huan luyen (huan luyen
+la buoc rieng, se lam sau khi 2 khoi nay chay dung). Vi vay do thi khoi phuc
+gan nhu chac chan SAI - dung de kiem tra pipeline noi dung nhau khong bi loi
+shape/kieu du lieu, KHONG phai ket qua khoa hoc.
 
 Chay: python gradio_app.py
 """
@@ -19,19 +19,17 @@ import gradio as gr
 
 from graph_builder import WebNLGGraphBuilder
 from semantic_encoder import SemanticEncoder
+from channel import awgn_channel
+from decoder import SemanticDecoder
 
-# ----- Nap model 1 lan duy nhat khi khoi dong app (khong nap lai moi lan bam nut) -----
 print("Dang nap model MiniLM va khoi tao Semantic Encoder...")
 builder = WebNLGGraphBuilder(device="cpu")
 encoder = SemanticEncoder(in_dim=builder.embed_dim)
-encoder.eval()  # chi demo forward pass, chua huan luyen
+encoder.eval()
 print("San sang.")
 
 
 def parse_triples(text: str):
-    """Moi dong 1 bo ba, cach nhau boi dau '|'. Vd:
-    Alan_Bean | was a crew member of | Apollo_12
-    """
     triples = []
     for line in text.strip().splitlines():
         line = line.strip()
@@ -43,78 +41,119 @@ def parse_triples(text: str):
     return triples
 
 
-def run_demo(triples_text: str):
-    triples = parse_triples(triples_text)
-    if not triples:
-        return None, "Chua nhap duoc bo ba nao hop le. Dinh dang: chu_the | quan_he | khach_the (moi dong 1 bo ba)."
-
-    graph = builder.triples_to_graph(triples)
-    with torch.no_grad():
-        z = encoder(graph)
-
-    # ---- Ve do thi tri thuc bang networkx ----
+def draw_graph(entities, triples, title):
     G = nx.DiGraph()
-    for name in graph.entities:
+    for name in entities:
         G.add_node(name)
     for s, p, o in triples:
-        G.add_edge(builder._clean(s), builder._clean(o), label=builder._clean(p))
+        G.add_edge(s, o, label=p)
 
-    fig, ax = plt.subplots(figsize=(6, 4.2))
+    fig, ax = plt.subplots(figsize=(5.5, 4))
+    if G.number_of_nodes() == 0:
+        ax.text(0.5, 0.5, "(khong co node nao)", ha="center", va="center")
+        ax.axis("off")
+        return fig
     pos = nx.spring_layout(G, seed=42, k=1.2)
-    nx.draw(
-        G, pos, ax=ax, with_labels=True, node_color="#8ecae6",
-        node_size=1900, font_size=9, arrows=True, arrowsize=18,
-    )
+    nx.draw(G, pos, ax=ax, with_labels=True, node_color="#8ecae6",
+             node_size=1700, font_size=8, arrows=True, arrowsize=16)
     edge_labels = nx.get_edge_attributes(G, "label")
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax, font_size=8)
-    ax.set_title(f"Do thi tri thuc: {len(graph.entities)} node, {len(triples)} canh")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax, font_size=7)
+    ax.set_title(title)
     fig.tight_layout()
-
-    # ---- Tom tat ket qua encoder ----
-    first_entity = graph.entities[0]
-    summary = (
-        f"So node trong do thi: {z.shape[0]}\n"
-        f"So chieu vector ngu nghia moi node: {z.shape[1]}\n\n"
-        f"Vi du vector cua node '{first_entity}' (5 gia tri dau):\n"
-        f"{[round(v, 4) for v in z[0][:5].tolist()]}\n\n"
-        "----\n"
-        "Luu y: Encoder o day CHUA duoc huan luyen (thuoc pham vi tuan 4). "
-        "Cac con so tren chi xac nhan pipeline chay dung dinh dang va shape, "
-        "chua phai ket qua khoa hoc. Sau khi them Channel + Decoder va huan luyen "
-        "o cac tuan sau, vector nay se thuc su mang y nghia ngu nghia cua cau."
-    )
-    return fig, summary
+    return fig
 
 
-with gr.Blocks(title="Demo Semantic Encoder - Tuan 4") as demo:
-    gr.Markdown(
-        "## Demo Semantic Encoder dung GAT (Tuan 4)\n"
-        "Nhap cac bo ba theo dinh dang WebNLG (moi dong: `chu_the | quan_he | khach_the`), "
-        "he thong se dung thanh do thi tri thuc va chay qua Semantic Encoder.\n\n"
-        "**Encoder chua duoc huan luyen** - day chi la buoc kiem tra kien truc, "
-        "chua phai ket qua thuc nghiem cuoi cung."
-    )
-    with gr.Row():
-        inp = gr.Textbox(
-            lines=6,
-            label="Nhap bo ba",
-            placeholder="Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA",
+def run_demo(triples_text: str, snr_db: float):
+    triples = parse_triples(triples_text)
+    if not triples:
+        empty = plt.figure()
+        return empty, empty, "Chua nhap duoc bo ba nao hop le. Dinh dang: chu_the | quan_he | khach_the (moi dong 1 bo ba)."
+
+    # ---- Buoc 1: Encoder (tuan 4) ----
+    graph = builder.triples_to_graph(triples)
+    entities = graph.entities
+    relations_vocab = sorted(set(builder._clean(p) for _, p, _ in triples))
+    clean_triples = [(builder._clean(s), builder._clean(p), builder._clean(o)) for s, p, o in triples]
+
+    with torch.no_grad():
+        z = encoder(graph)  # vector ngu nghia goc [N, 128]
+
+        # ---- Buoc 2: Kenh AWGN (tuan 5) ----
+        z_noisy = awgn_channel(z, snr_db)
+
+        # ---- Buoc 3: Decoder (tuan 5, kien truc, CHUA huan luyen) ----
+        num_entities = len(entities)
+        num_relations = len(relations_vocab)
+        decoder = SemanticDecoder(
+            embed_dim=z.shape[1], num_entities=num_entities, num_relations=num_relations
         )
-    btn = gr.Button("Chay Semantic Encoder", variant="primary")
-    with gr.Row():
-        out_plot = gr.Plot(label="Do thi tri thuc duoc tao ra")
-        out_text = gr.Textbox(label="Ket qua Semantic Encoder", lines=12)
+        decoder.eval()
+        node_logits, relation_logits = decoder(z_noisy)
 
-    btn.click(fn=run_demo, inputs=inp, outputs=[out_plot, out_text])
+        pred_entity_idx = node_logits.argmax(dim=-1).tolist()
+        pred_entities = [entities[i] for i in pred_entity_idx]
+
+        relation_pred = relation_logits.argmax(dim=-1)  # [N, N]
+        none_idx = num_relations  # nhan "none" nam o vi tri cuoi
+        reconstructed_triples = []
+        for i in range(num_entities):
+            for j in range(num_entities):
+                if i == j:
+                    continue
+                r_idx = relation_pred[i, j].item()
+                if r_idx != none_idx:
+                    reconstructed_triples.append((pred_entities[i], relations_vocab[r_idx], pred_entities[j]))
+
+    noise_mse = (z - z_noisy).pow(2).mean().item()
+
+    fig_original = draw_graph(entities, clean_triples, f"Do thi GOC ({len(entities)} node, {len(clean_triples)} canh)")
+    fig_recon = draw_graph(
+        list(dict.fromkeys(pred_entities)), reconstructed_triples,
+        f"Do thi KHOI PHUC sau kenh nhieu (SNR = {snr_db} dB)",
+    )
+
+    summary = (
+        f"SNR da chon: {snr_db} dB | Sai lech trung binh do nhieu (MSE): {noise_mse:.4f}\n\n"
+        f"So bo ba goc: {len(clean_triples)}\n"
+        f"So bo ba decoder doan duoc: {len(reconstructed_triples)}\n\n"
+        "----\n"
+        "Luu y: Decoder CHUA duoc huan luyen, nen do thi khoi phuc o day "
+        "gan nhu chac chan sai/ngau nhien. Buoc nay chi xac nhan Encoder -> "
+        "Kenh AWGN -> Decoder noi voi nhau dung shape, chua phai ket qua "
+        "thuc nghiem. Ket qua that se co sau khi huan luyen mo hinh."
+    )
+    return fig_original, fig_recon, summary
+
+
+with gr.Blocks(title="Demo Semantic Communication - Tuan 4-5") as demo:
+    gr.Markdown(
+        "## Demo Semantic Communication: Encoder + Kenh AWGN + Decoder\n"
+        "Nhap bo ba (dinh dang `chu_the | quan_he | khach_the`, moi dong 1 bo ba), "
+        "chon muc SNR, xem do thi goc va do thi ma decoder khoi phuc duoc.\n\n"
+        "**Encoder va Decoder deu CHUA duoc huan luyen** - day la buoc kiem tra "
+        "kien truc va cach noi cac khoi, chua phai ket qua thuc nghiem cuoi cung."
+    )
+    inp = gr.Textbox(
+        lines=5, label="Nhap bo ba",
+        placeholder="Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA",
+    )
+    snr_slider = gr.Slider(minimum=-6, maximum=18, step=3, value=10, label="SNR (dB) - theo dai da chon o Muc 3.3")
+    btn = gr.Button("Chay Encoder -> Channel -> Decoder", variant="primary")
+
+    with gr.Row():
+        out_plot_original = gr.Plot(label="Do thi goc")
+        out_plot_recon = gr.Plot(label="Do thi khoi phuc (chua huan luyen)")
+    out_text = gr.Textbox(label="Tom tat", lines=10)
+
+    btn.click(fn=run_demo, inputs=[inp, snr_slider], outputs=[out_plot_original, out_plot_recon, out_text])
 
     gr.Examples(
         examples=[
-            "Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA",
-            "Amsterdam_Airport_Schiphol | location | Netherlands\nNetherlands | leader | Mark_Rutte",
+            ["Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA", 10],
+            ["Amsterdam_Airport_Schiphol | location | Netherlands\nNetherlands | leader | Mark_Rutte", -6],
         ],
-        inputs=inp,
+        inputs=[inp, snr_slider],
     )
 
 if __name__ == "__main__":
-    # share=True de Colab tao 1 link cong khai tam thoi, mo duoc tren dien thoai/may khac
     demo.launch(share=True)
