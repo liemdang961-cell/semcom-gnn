@@ -96,7 +96,7 @@ def load_webnlg_triples(split: str = "train", max_samples: int | None = None) ->
     """
     from datasets import load_dataset
 
-    ds = load_dataset("web_nlg", "release_v3.0_en", split=split)
+    ds = load_dataset("web_nlg", "release_v3.0_en", split=split, trust_remote_code=True)
     if max_samples:
         ds = ds.select(range(min(max_samples, len(ds))))
 

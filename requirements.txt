@@ -1,7 +1,7 @@
 torch
 torch_geometric
 sentence-transformers
-datasets
+datasets==2.19.0
 gradio
 networkx
 matplotlib
