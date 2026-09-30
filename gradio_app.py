@@ -32,6 +32,7 @@ from decoder import SemanticDecoder
 # Tim checkpoint o 2 noi: thu muc hien tai (upload tay) HOAC trong Google
 # Drive da duoc gan vao Colab (drive.mount). Dung file dau tien tim thay duoc.
 CHECKPOINT_CANDIDATES = [
+    "/content/drive/MyDrive/KhoaLuan_SemCom/checkpoint_week5.pt",
     "checkpoint_week5.pt",
     "/content/drive/MyDrive/checkpoint_week5.pt",
 ]
@@ -136,20 +137,43 @@ def run_demo(triples_text: str, snr_db: float, use_ai: bool):
         z_noisy = awgn_channel(z, snr_db)
 
     fig_original = draw_graph(entities, clean_triples, f"Do thi GOC ({len(entities)} node, {len(clean_triples)} canh)")
-
-    encoder_note = "" if checkpoint_loaded else "(Encoder CHUA huan luyen - checkpoint chua duoc nap)\n"
+    n = len(entities)
 
     if not use_ai:
-        fig_recon = blank_fig("Chua bat 'Su dung AI khoi phuc'.\n\nDay chi la 128 con so da bi nhieu,\nkhong tu doc hieu duoc.")
+        # AI CHUA huan luyen: dung 1 decoder khoi tao ngau nhien (tu dien
+        # thu nho, chi lay tu chinh cau nhap vao) de minh hoa AI "doan lui"
+        # khi chua duoc hoc - thuong gop nhieu node lai thanh 1-2 node sai.
+        local_relations = sorted(set(p for _, p, _ in clean_triples))
+        random_decoder = SemanticDecoder(
+            embed_dim=z_noisy.shape[1], num_entities=n, num_relations=len(local_relations)
+        )
+        random_decoder.eval()
+        with torch.no_grad():
+            node_logits, relation_logits = random_decoder(z_noisy)
+
+        pred_entities = [entities[i] for i in node_logits.argmax(dim=-1).tolist()]
+        relation_pred = relation_logits.argmax(dim=-1)
+        none_idx = len(local_relations)
+        reconstructed_triples = []
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                r_idx = relation_pred[i, j].item()
+                if r_idx != none_idx:
+                    reconstructed_triples.append((pred_entities[i], local_relations[r_idx], pred_entities[j]))
+
+        fig_recon = draw_graph(
+            list(dict.fromkeys(pred_entities)), reconstructed_triples,
+            f"Do thi KHOI PHUC - AI CHUA huan luyen (SNR = {snr_db} dB)",
+        )
         summary = (
-            f"{encoder_note}"
             f"SNR da chon: {snr_db} dB\n"
-            f"Vector sau kenh nhieu (5 gia tri dau cua node dau tien):\n"
-            f"{[round(v, 4) for v in z_noisy[0][:5].tolist()]}\n\n"
+            f"So bo ba goc: {len(clean_triples)} | So bo ba doan duoc: {len(reconstructed_triples)}\n\n"
             "----\n"
-            "Day la du lieu THAT SU da di qua kenh nhieu AWGN, nhung CHUA duoc\n"
-            "AI khoi phuc lai. Tich chon 'Su dung AI khoi phuc' de xem AI da\n"
-            "huan luyen co the doan lai duoc gi tu 128 so nay."
+            "AI o day CHUA duoc huan luyen (trong so ngau nhien), nen doan lung\n"
+            "tung, thuong gop nhieu thuc the lai thanh 1-2 thuc the sai. Tich\n"
+            "chon 'Su dung AI da huan luyen' de xem ket qua sau khi AI da hoc."
         )
         return fig_original, fig_recon, summary
 
@@ -167,7 +191,6 @@ def run_demo(triples_text: str, snr_db: float, use_ai: bool):
     relation_pred = relation_logits.argmax(dim=-1)
     none_idx = len(relation_vocab)
     reconstructed_triples = []
-    n = len(entities)
     for i in range(n):
         for j in range(n):
             if i == j:
@@ -178,7 +201,7 @@ def run_demo(triples_text: str, snr_db: float, use_ai: bool):
 
     fig_recon = draw_graph(
         list(dict.fromkeys(pred_entities)), reconstructed_triples,
-        f"Do thi KHOI PHUC boi AI (SNR = {snr_db} dB)",
+        f"Do thi KHOI PHUC boi AI da huan luyen (SNR = {snr_db} dB)",
     )
 
     unknown_entities = [e for e in entities if e not in entity_vocab]
@@ -197,7 +220,7 @@ def run_demo(triples_text: str, snr_db: float, use_ai: bool):
         "----\n"
         "Day la ket qua tu AI DA HUAN LUYEN (chi 300 cau, 5 epoch - con rat\n"
         "so khai). Ket qua co the van sai nhieu, nhung day la lan dau tien\n"
-        "he thong thuc su 'hoc' de khoi phuc, khac voi doan ngau nhien truoc do."
+        "he thong thuc su 'hoc' de khoi phuc, khac voi doan ngau nhien ben tren."
     )
     return fig_original, fig_recon, summary
 
