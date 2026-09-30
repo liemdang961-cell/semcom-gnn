@@ -1,17 +1,24 @@
 """
-Giao dien demo - tich hop Encoder (tuan 4) + Kenh AWGN + Decoder (tuan 5).
+Giao dien demo - tich hop Encoder + Kenh AWGN + Decoder.
 
-Luong chay: nhap bo ba -> graph_builder -> semantic_encoder -> channel (AWGN)
--> decoder -> hien do thi goc va do thi "khoi phuc duoc".
+Co them 1 o tick "Su dung AI da huan luyen de khoi phuc":
+  - TAT (mac dinh): chi chay Encoder -> Channel, dung lai o do. Hien dung
+    128 so da bi nhieu, KHONG co gang doan lai gi ca - minh hoa dung y
+    "du lieu qua kenh nhieu that su bi hong, khong dung AI thi vo nghia".
+  - BAT: nap checkpoint_week5.pt (Encoder + Decoder DA HUAN LUYEN tren 300
+    cau) va cho no thu khoi phuc lai do thi.
 
-LUU Y QUAN TRONG: encoder VA decoder o day CHUA duoc huan luyen (huan luyen
-la buoc rieng, se lam sau khi 2 khoi nay chay dung). Vi vay do thi khoi phuc
-gan nhu chac chan SAI - dung de kiem tra pipeline noi dung nhau khong bi loi
-shape/kieu du lieu, KHONG phai ket qua khoa hoc.
+LUU Y QUAN TRONG: checkpoint chi hoc tu 300 cau, nen Decoder chi "biet"
+dung 283 thuc the va 50 quan he nam trong 300 cau do. Neu ban tu go ten
+nam ngoai pham vi nay, ket qua doan se sai vi AI chua tung thay ten do
+bao gio - day khong phai loi code.
 
 Chay: python gradio_app.py
+(Truoc khi chay, upload checkpoint_week5.pt vao cung thu muc qua khung
+Tep ben trai Colab, neu muon dung o tick "Su dung AI".)
 """
 
+import os
 import torch
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -22,11 +29,53 @@ from semantic_encoder import SemanticEncoder
 from channel import awgn_channel
 from decoder import SemanticDecoder
 
+# Tim checkpoint o 2 noi: thu muc hien tai (upload tay) HOAC trong Google
+# Drive da duoc gan vao Colab (drive.mount). Dung file dau tien tim thay duoc.
+CHECKPOINT_CANDIDATES = [
+    "checkpoint_week5.pt",
+    "/content/drive/MyDrive/checkpoint_week5.pt",
+]
+CHECKPOINT_PATH = next((p for p in CHECKPOINT_CANDIDATES if os.path.exists(p)), CHECKPOINT_CANDIDATES[0])
+
 print("Dang nap model MiniLM va khoi tao Semantic Encoder...")
 builder = WebNLGGraphBuilder(device="cpu")
-encoder = SemanticEncoder(in_dim=builder.embed_dim)
-encoder.eval()
+untrained_encoder = SemanticEncoder(in_dim=builder.embed_dim)
+untrained_encoder.eval()
 print("San sang.")
+
+# ----- Thu nap checkpoint da huan luyen (neu co) -----
+trained_encoder = None
+trained_decoder = None
+entity_vocab, relation_vocab = None, None
+idx_to_entity, idx_to_relation = None, None
+checkpoint_loaded = False
+
+if os.path.exists(CHECKPOINT_PATH):
+    try:
+        ckpt = torch.load(CHECKPOINT_PATH, map_location="cpu")
+        entity_vocab = ckpt["entity_vocab"]
+        relation_vocab = ckpt["relation_vocab"]
+        idx_to_entity = {i: name for name, i in entity_vocab.items()}
+        idx_to_relation = {i: name for name, i in relation_vocab.items()}
+
+        trained_encoder = SemanticEncoder(in_dim=builder.embed_dim)
+        trained_encoder.load_state_dict(ckpt["encoder"])
+        trained_encoder.eval()
+
+        trained_decoder = SemanticDecoder(
+            embed_dim=128, num_entities=len(entity_vocab), num_relations=len(relation_vocab)
+        )
+        trained_decoder.load_state_dict(ckpt["decoder"])
+        trained_decoder.eval()
+
+        checkpoint_loaded = True
+        print(f"Da nap checkpoint: {len(entity_vocab)} thuc the, {len(relation_vocab)} quan he "
+              f"(huan luyen o SNR = {ckpt.get('snr_db_trained', '?')} dB).")
+    except Exception as e:  # phong truong hop file loi/khong tuong thich
+        print(f"Khong nap duoc checkpoint ({e}). O tick AI se khong dung duoc.")
+else:
+    print(f"Chua thay {CHECKPOINT_PATH} trong thu muc hien tai. O tick AI se khong dung duoc "
+          f"cho den khi ban upload file nay qua khung Tep ben trai Colab.")
 
 
 def parse_triples(text: str):
@@ -63,96 +112,124 @@ def draw_graph(entities, triples, title):
     return fig
 
 
-def run_demo(triples_text: str, snr_db: float):
+def blank_fig(message: str):
+    fig, ax = plt.subplots(figsize=(5.5, 4))
+    ax.text(0.5, 0.5, message, ha="center", va="center", wrap=True, fontsize=10)
+    ax.axis("off")
+    return fig
+
+
+def run_demo(triples_text: str, snr_db: float, use_ai: bool):
     triples = parse_triples(triples_text)
     if not triples:
         empty = plt.figure()
         return empty, empty, "Chua nhap duoc bo ba nao hop le. Dinh dang: chu_the | quan_he | khach_the (moi dong 1 bo ba)."
 
-    # ---- Buoc 1: Encoder (tuan 4) ----
+    clean_triples = [(builder._clean(s), builder._clean(p), builder._clean(o)) for s, p, o in triples]
     graph = builder.triples_to_graph(triples)
     entities = graph.entities
-    relations_vocab = sorted(set(builder._clean(p) for _, p, _ in triples))
-    clean_triples = [(builder._clean(s), builder._clean(p), builder._clean(o)) for s, p, o in triples]
+
+    active_encoder = trained_encoder if checkpoint_loaded else untrained_encoder
 
     with torch.no_grad():
-        z = encoder(graph)  # vector ngu nghia goc [N, 128]
-
-        # ---- Buoc 2: Kenh AWGN (tuan 5) ----
+        z = active_encoder(graph)
         z_noisy = awgn_channel(z, snr_db)
 
-        # ---- Buoc 3: Decoder (tuan 5, kien truc, CHUA huan luyen) ----
-        num_entities = len(entities)
-        num_relations = len(relations_vocab)
-        decoder = SemanticDecoder(
-            embed_dim=z.shape[1], num_entities=num_entities, num_relations=num_relations
-        )
-        decoder.eval()
-        node_logits, relation_logits = decoder(z_noisy)
-
-        pred_entity_idx = node_logits.argmax(dim=-1).tolist()
-        pred_entities = [entities[i] for i in pred_entity_idx]
-
-        relation_pred = relation_logits.argmax(dim=-1)  # [N, N]
-        none_idx = num_relations  # nhan "none" nam o vi tri cuoi
-        reconstructed_triples = []
-        for i in range(num_entities):
-            for j in range(num_entities):
-                if i == j:
-                    continue
-                r_idx = relation_pred[i, j].item()
-                if r_idx != none_idx:
-                    reconstructed_triples.append((pred_entities[i], relations_vocab[r_idx], pred_entities[j]))
-
-    noise_mse = (z - z_noisy).pow(2).mean().item()
-
     fig_original = draw_graph(entities, clean_triples, f"Do thi GOC ({len(entities)} node, {len(clean_triples)} canh)")
+
+    encoder_note = "" if checkpoint_loaded else "(Encoder CHUA huan luyen - checkpoint chua duoc nap)\n"
+
+    if not use_ai:
+        fig_recon = blank_fig("Chua bat 'Su dung AI khoi phuc'.\n\nDay chi la 128 con so da bi nhieu,\nkhong tu doc hieu duoc.")
+        summary = (
+            f"{encoder_note}"
+            f"SNR da chon: {snr_db} dB\n"
+            f"Vector sau kenh nhieu (5 gia tri dau cua node dau tien):\n"
+            f"{[round(v, 4) for v in z_noisy[0][:5].tolist()]}\n\n"
+            "----\n"
+            "Day la du lieu THAT SU da di qua kenh nhieu AWGN, nhung CHUA duoc\n"
+            "AI khoi phuc lai. Tich chon 'Su dung AI khoi phuc' de xem AI da\n"
+            "huan luyen co the doan lai duoc gi tu 128 so nay."
+        )
+        return fig_original, fig_recon, summary
+
+    if not checkpoint_loaded:
+        fig_recon = blank_fig(f"Chua tim thay {CHECKPOINT_PATH}.\nHay upload file nay vao Colab\nqua khung Tep ben trai.")
+        summary = f"Khong the dung AI khoi phuc vi chua nap duoc {CHECKPOINT_PATH}."
+        return fig_original, fig_recon, summary
+
+    with torch.no_grad():
+        node_logits, relation_logits = trained_decoder(z_noisy)
+
+    pred_entity_idx = node_logits.argmax(dim=-1).tolist()
+    pred_entities = [idx_to_entity.get(i, "?") for i in pred_entity_idx]
+
+    relation_pred = relation_logits.argmax(dim=-1)
+    none_idx = len(relation_vocab)
+    reconstructed_triples = []
+    n = len(entities)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            r_idx = relation_pred[i, j].item()
+            if r_idx != none_idx:
+                reconstructed_triples.append((pred_entities[i], idx_to_relation.get(r_idx, "?"), pred_entities[j]))
+
     fig_recon = draw_graph(
         list(dict.fromkeys(pred_entities)), reconstructed_triples,
-        f"Do thi KHOI PHUC sau kenh nhieu (SNR = {snr_db} dB)",
+        f"Do thi KHOI PHUC boi AI (SNR = {snr_db} dB)",
     )
 
+    unknown_entities = [e for e in entities if e not in entity_vocab]
+    caveat = ""
+    if unknown_entities:
+        caveat = (
+            f"\nLUU Y: {len(unknown_entities)} thuc the ban nhap ({', '.join(unknown_entities[:3])}...) "
+            f"KHONG nam trong 283 thuc the AI da hoc, nen AI chac chan doan sai cho cac thuc the nay.\n"
+        )
+
     summary = (
-        f"SNR da chon: {snr_db} dB | Sai lech trung binh do nhieu (MSE): {noise_mse:.4f}\n\n"
-        f"So bo ba goc: {len(clean_triples)}\n"
-        f"So bo ba decoder doan duoc: {len(reconstructed_triples)}\n\n"
+        f"SNR da chon: {snr_db} dB | Checkpoint hoc tu 300 cau "
+        f"({len(entity_vocab)} thuc the, {len(relation_vocab)} quan he)\n"
+        f"So bo ba goc: {len(clean_triples)} | So bo ba AI doan duoc: {len(reconstructed_triples)}\n"
+        f"{caveat}\n"
         "----\n"
-        "Luu y: Decoder CHUA duoc huan luyen, nen do thi khoi phuc o day "
-        "gan nhu chac chan sai/ngau nhien. Buoc nay chi xac nhan Encoder -> "
-        "Kenh AWGN -> Decoder noi voi nhau dung shape, chua phai ket qua "
-        "thuc nghiem. Ket qua that se co sau khi huan luyen mo hinh."
+        "Day la ket qua tu AI DA HUAN LUYEN (chi 300 cau, 5 epoch - con rat\n"
+        "so khai). Ket qua co the van sai nhieu, nhung day la lan dau tien\n"
+        "he thong thuc su 'hoc' de khoi phuc, khac voi doan ngau nhien truoc do."
     )
     return fig_original, fig_recon, summary
 
 
-with gr.Blocks(title="Demo Semantic Communication - Tuan 4-5") as demo:
+with gr.Blocks(title="Demo Semantic Communication") as demo:
     gr.Markdown(
-        "## Demo Semantic Communication: Encoder + Kenh AWGN + Decoder\n"
-        "Nhap bo ba (dinh dang `chu_the | quan_he | khach_the`, moi dong 1 bo ba), "
-        "chon muc SNR, xem do thi goc va do thi ma decoder khoi phuc duoc.\n\n"
-        "**Encoder va Decoder deu CHUA duoc huan luyen** - day la buoc kiem tra "
-        "kien truc va cach noi cac khoi, chua phai ket qua thuc nghiem cuoi cung."
+        "## Demo Semantic Communication: Encoder + Kenh AWGN + AI khoi phuc\n"
+        "Nhap bo ba (dinh dang `chu_the | quan_he | khach_the`, moi dong 1 bo ba), chon SNR.\n\n"
+        + ("**Da nap AI huan luyen tu 300 cau WebNLG.**" if checkpoint_loaded
+           else "**Chua nap duoc checkpoint - upload `checkpoint_week5.pt` vao Colab de bat AI khoi phuc.**")
     )
     inp = gr.Textbox(
         lines=5, label="Nhap bo ba",
         placeholder="Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA",
     )
-    snr_slider = gr.Slider(minimum=-6, maximum=18, step=3, value=10, label="SNR (dB) - theo dai da chon o Muc 3.3")
-    btn = gr.Button("Chay Encoder -> Channel -> Decoder", variant="primary")
+    snr_slider = gr.Slider(minimum=-6, maximum=18, step=3, value=10, label="SNR (dB) - muc nhieu kenh truyen")
+    use_ai_checkbox = gr.Checkbox(label="Su dung AI da huan luyen de khoi phuc", value=False)
+    btn = gr.Button("Chay thu", variant="primary")
 
     with gr.Row():
         out_plot_original = gr.Plot(label="Do thi goc")
-        out_plot_recon = gr.Plot(label="Do thi khoi phuc (chua huan luyen)")
+        out_plot_recon = gr.Plot(label="Ket qua sau kenh nhieu")
     out_text = gr.Textbox(label="Tom tat", lines=10)
 
-    btn.click(fn=run_demo, inputs=[inp, snr_slider], outputs=[out_plot_original, out_plot_recon, out_text])
+    btn.click(fn=run_demo, inputs=[inp, snr_slider, use_ai_checkbox], outputs=[out_plot_original, out_plot_recon, out_text])
 
     gr.Examples(
         examples=[
-            ["Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA", 10],
-            ["Amsterdam_Airport_Schiphol | location | Netherlands\nNetherlands | leader | Mark_Rutte", -6],
+            ["Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA", 10, False],
+            ["Alan_Bean | was a crew member of | Apollo_12\nApollo_12 | operator | NASA\nAlan_Bean | was selected by | NASA", 10, True],
         ],
-        inputs=[inp, snr_slider],
+        inputs=[inp, snr_slider, use_ai_checkbox],
     )
 
 if __name__ == "__main__":
