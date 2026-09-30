@@ -12,8 +12,9 @@ Khóa luận tốt nghiệp - Khoa Công nghệ Thông tin, Trường Đại h�
 | `semantic_encoder.py` | Semantic Encoder dùng GAT có kết hợp đặc trưng cạnh, xuất vector 128 chiều |
 | `channel.py` | Mô phỏng kênh truyền AWGN |
 | `decoder.py` | Semantic Decoder (Node Classifier + Relation Classifier) |
-| `gradio_app.py` | Giao diện demo: Encoder → Channel → Decoder, có ô tick "Sử dụng AI đã huấn luyện" để so sánh trước/sau khi học |
-| `train.py` | Vòng lặp huấn luyện Encoder + Decoder trên bộ ba WebNLG, lưu checkpoint |
+| `gradio_app.py` | Giao diện demo: Encoder → Channel → Decoder, có ô chọn mô hình (checkpoint) để so sánh trước/sau khi học |
+| `train.py` | Vòng lặp huấn luyện Encoder + Decoder trên bộ ba WebNLG, lưu checkpoint vào `checkpoints/` |
+| `checkpoints/` | Chứa các file mô hình đã huấn luyện (`.pt`), nằm sẵn trong repo |
 | `requirements.txt` | Danh sách thư viện cần cài |
 
 ## Tiến độ
@@ -26,21 +27,21 @@ Khóa luận tốt nghiệp - Khoa Công nghệ Thông tin, Trường Đại h�
 - [ ] Tuần 9: Adversarial Training
 - [ ] Tuần 10-12: Tối ưu, viết báo cáo
 
-> Lưu ý: Checkpoint hiện tại (`checkpoint_week5.pt`) mới học từ 300 câu, 5 epoch - chỉ để kiểm tra pipeline học được, chưa phải số liệu khoa học chính thức của khóa luận.
+> Lưu ý: Checkpoint hiện tại (`checkpoints/checkpoint_week5.pt`) mới học từ 300 câu, 5 epoch - chỉ để kiểm tra pipeline học được, chưa phải số liệu khoa học chính thức của khóa luận.
 
-## Sử dụng checkpoint đã huấn luyện (tùy chọn)
+## Checkpoint đã huấn luyện
 
-Giao diện có ô tick **"Sử dụng AI đã huấn luyện để khôi phục"**. Muốn dùng được ô này:
+Các file mô hình đã huấn luyện (`.pt`) được lưu **trực tiếp trong repo**, ở thư mục `checkpoints/` - không cần Google Drive hay upload thủ công. Chỉ cần `git clone` là có sẵn để dùng ngay, kể cả khi giảng viên tự chạy thử.
 
-1. File `checkpoint_week5.pt` (sinh ra sau khi chạy `train.py`) được lưu ở Google Drive, **không** đưa lên GitHub (xem mục "Lưu ý" cuối trang).
-2. Trong Colab, mount Drive trước khi chạy giao diện:
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-```
-3. Đảm bảo file nằm đúng đường dẫn `/content/drive/MyDrive/KhoaLuan_SemCom/checkpoint_week5.pt` (đường dẫn này đã được ghi cứng trong `gradio_app.py`; nếu nhóm lưu ở chỗ khác, cần sửa lại danh sách `CHECKPOINT_CANDIDATES` trong file đó).
+Giao diện tự động quét thư mục này và liệt kê mọi checkpoint tìm được vào ô **"Chọn mô hình"**, kèm tuỳ chọn "Không dùng AI (ngẫu nhiên)" để so sánh trước/sau khi huấn luyện.
 
-Không tick ô này (mặc định): giao diện vẫn cho xem thử bước khôi phục, nhưng dùng AI **chưa học** (trọng số ngẫu nhiên) - minh họa rõ sự khác biệt trước/sau khi huấn luyện.
+**Khi có checkpoint mới ở các tuần sau** (tuần 6, 7...):
+1. Trong `train.py`, đổi `CHECKPOINT_LABEL` (ví dụ "Tuần 6 - full dữ liệu") và `CHECKPOINT_PATH` (ví dụ `checkpoints/checkpoint_week6.pt`) - **đặt tên khác**, không ghi đè file cũ.
+2. Chạy `train.py`, kiểm tra dung lượng file trước khi up: `!ls -lh checkpoints/`.
+3. Upload file mới vào đúng thư mục `checkpoints/` trên GitHub.
+   - Dưới 25 MB: kéo-thả qua giao diện web như bình thường.
+   - 25–100 MB: web không nhận nữa, cần đẩy bằng dòng lệnh Git (`git add`, `git commit`, `git push`).
+   - Trên 100 MB: GitHub từ chối hẳn, lúc đó cần dùng Git LFS.
 
 ## Cài đặt và chạy trên Google Colab
 
@@ -51,18 +52,6 @@ Không tick ô này (mặc định): giao diện vẫn cho xem thử bước kh�
 !git clone https://github.com/liemdang961-cell/semcom-gnn.git
 %cd semcom-gnn
 !pip install -r requirements.txt -q
-```
-
-Nếu muốn dùng ô tick "Sử dụng AI đã huấn luyện" (xem mục bên dưới), chạy thêm ở 1 ô riêng:
-
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-```
-
-Cuối cùng, chạy giao diện:
-
-```python
 !python gradio_app.py
 ```
 

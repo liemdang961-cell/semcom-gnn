@@ -9,6 +9,7 @@ mau nhu Bang 3.1). Khi chay on dinh, tang MAX_SAMPLES dan len.
 Chay: python train.py
 """
 
+import os
 import random
 import torch
 import torch.nn as nn
@@ -19,14 +20,16 @@ from channel import awgn_channel
 from decoder import SemanticDecoder
 
 # ----------------- Cau hinh (se tinh chinh lai o Tuan 10 - "toi uu mo hinh") -----------------
-MAX_SAMPLES = 300      # so cau lay de chay thu; tang dan len 20000 khi da on dinh
+MAX_SAMPLES = 300       # so cau lay de chay thu; tang dan len khi da on dinh (toi da ~17.668 cau)
 TRAIN_RATIO = 0.9
 SNR_DB = 10             # tam thoi huan luyen o 1 muc SNR co dinh (giong Hello et al. huan luyen o 14dB)
-EPOCHS = 5
+MAX_EPOCHS = 100        # gioi han TREN, it khi chay het vi Early Stopping se tu dung som hon
+EARLY_STOP_PATIENCE = 15  # neu val_loss khong giam sau 15 epoch lien tiep -> tu dung (Muc 2.2.1)
 LR = 1e-3
 ACCUM_STEPS = 8         # gom 8 cau moi lan cap nhat trong so, gia lap "batch size"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-CHECKPOINT_PATH = "checkpoint_week5.pt"
+CHECKPOINT_LABEL = "Tuan 5 - 300 cau"  # doi thanh "Tuan 6 - ..." khi chay lai o tuan 6, v.v.
+CHECKPOINT_PATH = "checkpoints/checkpoint_week5.pt"  # doi ten file tuong ung, KHONG de trung ten cu
 
 
 def build_vocab(all_triples):
@@ -110,6 +113,7 @@ def run_epoch(graphs_with_triples, encoder, decoder, optimizer, node_loss_fn, re
 
 
 def main():
+    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
     print(f"Dang chay tren: {DEVICE}")
     print("Dang tai du lieu WebNLG (can mang internet)...")
     all_triples = load_webnlg_triples(split="train", max_samples=MAX_SAMPLES)
@@ -145,7 +149,9 @@ def main():
     relation_loss_fn = nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
-    for epoch in range(1, EPOCHS + 1):
+    epochs_no_improve = 0
+
+    for epoch in range(1, MAX_EPOCHS + 1):
         train_loss = run_epoch(
             train_set, encoder, decoder, optimizer, node_loss_fn, relation_loss_fn,
             entity_vocab, relation_vocab, train=True,
@@ -154,20 +160,29 @@ def main():
             val_set, encoder, decoder, optimizer, node_loss_fn, relation_loss_fn,
             entity_vocab, relation_vocab, train=False,
         )
-        print(f"[Epoch {epoch}/{EPOCHS}] train_loss = {train_loss:.4f} | val_loss = {val_loss:.4f}")
+        print(f"[Epoch {epoch}/{MAX_EPOCHS}] train_loss = {train_loss:.4f} | val_loss = {val_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            epochs_no_improve = 0
             torch.save({
+                "label": CHECKPOINT_LABEL,
                 "encoder": encoder.state_dict(),
                 "decoder": decoder.state_dict(),
                 "entity_vocab": entity_vocab,
                 "relation_vocab": relation_vocab,
                 "snr_db_trained": SNR_DB,
+                "num_samples_trained": len(all_triples),
             }, CHECKPOINT_PATH)
             print(f"  -> val_loss giam, da luu checkpoint vao {CHECKPOINT_PATH}")
+        else:
+            epochs_no_improve += 1
+            print(f"  -> val_loss khong giam ({epochs_no_improve}/{EARLY_STOP_PATIENCE} epoch lien tiep)")
+            if epochs_no_improve >= EARLY_STOP_PATIENCE:
+                print(f"Early Stopping: val_loss khong giam sau {EARLY_STOP_PATIENCE} epoch, dung tai epoch {epoch}.")
+                break
 
-    print("Huan luyen xong.")
+    print(f"Huan luyen xong. Checkpoint tot nhat: val_loss = {best_val_loss:.4f} -> {CHECKPOINT_PATH}")
 
 
 if __name__ == "__main__":
