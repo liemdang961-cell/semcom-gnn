@@ -23,7 +23,11 @@ class WebNLGGraphBuilder:
     def __init__(self, embed_model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
         self.device = device
         self.embedder = SentenceTransformer(embed_model_name, device=device)
-        self.embed_dim = self.embedder.get_sentence_embedding_dimension()  # 384
+        # Ten ham nay doi giua cac phien ban thu vien, thu ca 2 cho chac
+        if hasattr(self.embedder, "get_embedding_dimension"):
+            self.embed_dim = self.embedder.get_embedding_dimension()
+        else:
+            self.embed_dim = self.embedder.get_sentence_embedding_dimension()  # 384
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -57,10 +61,14 @@ class WebNLGGraphBuilder:
         if len(entities) == 0:
             raise ValueError("Danh sach triples rong, khong the tao do thi.")
 
-        # Nhung tat ca thuc the va quan he trong 1 lan goi cho nhanh
-        node_emb = self.embedder.encode(entities, convert_to_tensor=True, device=self.device)
+        # Nhung tat ca thuc the va quan he trong 1 lan goi cho nhanh.
+        # LUU Y: SentenceTransformer.encode() tra ve "inference tensor" (chi de
+        # xem, khong dung de tinh dao ham nguoc duoc). Phai .clone() de tao ban
+        # sao binh thuong, neu khong train.py se bao loi "Inference tensors
+        # cannot be saved for backward" ngay khi bat dau huan luyen.
+        node_emb = self.embedder.encode(entities, convert_to_tensor=True, device=self.device).clone()
         if relation_texts:
-            edge_emb = self.embedder.encode(relation_texts, convert_to_tensor=True, device=self.device)
+            edge_emb = self.embedder.encode(relation_texts, convert_to_tensor=True, device=self.device).clone()
             edge_index = torch.tensor([src_list, dst_list], dtype=torch.long)
         else:
             # Do thi chi co 1 node, khong co canh nao (hiem gap voi WebNLG)
