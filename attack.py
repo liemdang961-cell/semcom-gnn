@@ -1,47 +1,58 @@
 """
-Tuan 7 - Mo hinh de doa (Threat Model) va tan cong doi khang FGSM len
-Semantic Encoder (Muc 2.4 / 3.2.3 khoa luan).
+Tuan 7 - Mo hinh de doa (Threat Model) va tan cong doi khang FGSM, DUNG
+KHOP voi Muc 2.4 / 2.5 / 3.4 da viet san trong khoa luan.
 
-===================== MO HINH DE DOA (THREAT MODEL) =====================
-- Attacker la ai: 1 thuc the co the can thiep tren DUONG TRUYEN, truoc khi
-  vector ngu nghia di vao kenh AWGN (vd: chen nhieu/sai lech vao chinh
-  dac trung dau vao ma Encoder nhan duoc, hoac biet truoc kien truc +
-  trong so cua Encoder/Decoder - kich ban "white-box").
-- Attacker lam gi: thay vi nhieu NGAU NHIEN nhu kenh AWGN (Tuan 5-6),
-  attacker tinh toan 1 nhieu CO CHU DICH, nho nhat co the (gioi han boi
-  ngan sach epsilon) nhung lam LOSS cua mo hinh tang len nhieu nhat -
-  tuc la co y lam Decoder doan sai thuc the/quan he.
-- Attacker KHONG the lam gi: khong thay doi duoc trong so cua Encoder/
-  Decoder da huan luyen (khong tan cong vao qua trinh train), chi tac
-  dong vao DU LIEU DAU VAO/duong truyen tai thoi diem suy luan (inference).
-- Phuong phap tan cong trien khai: FGSM (Fast Gradient Sign Method -
-  Goodfellow et al., 2015), 1 phuong phap tan cong doi khang pho bien,
-  dung dao ham (gradient) cua loss theo dau vao de tao nhieu:
+===================== MO HINH DE DOA (THREAT MODEL, Muc 2.4.1) =========
+Ke tan cong dong vai 1 thuc the "dung giua" (Man-in-the-Middle) tren KENH
+TRUYEN VO TUYEN: chan vector ngu nghia z (dau ra cua Semantic Encoder,
+tuc la cai THUC SU duoc truyen di) va chen them nhieu doi khang delta
+TRUOC KHI tin hieu toi duoc bo nhan hop phap.
 
-      x_adv = x + epsilon * sign( d(Loss)/dx )
+QUAN TRONG: nhieu doi khang duoc chen vao z (dau ra Encoder, tren duong
+truyen) - KHONG PHAI vao dac trung tho 384 chieu truoc Encoder (do la noi
+ke tan cong KHONG co quyen truy cap, vi no nam ben trong may phat, truoc
+khi du lieu duoc dua len kenh truyen). Day la diem de nham lan, ban dau
+mot phien ban cua file nay da code nham vao dac trung tho - da sua lai
+cho dung voi vi du so minh hoa z=[0.9,1.7] -> z'=[0.8,1.8] o Muc 2.4.2.
 
-  voi x la dac trung node tho (384 chieu tu MiniLM) TRUOC khi vao
-  Semantic Encoder, epsilon la "ngan sach" nhieu (cang lon thi nhieu
-  cang manh nhung cang de bi phat hien). Day la tan cong 1-buoc (single-
-  step), phu hop lam baseline danh gia muc do de bi tan cong cua he
-  thong, truoc khi xet toi phong thu (Adversarial Training - de o Tuan
-  sau neu can).
-===========================================================================
+Kich ban white-box (Muc 2.4.1): ke tan cong biet het kien truc + trong so
+cua Encoder/Decoder, nen tinh duoc chinh xac gradient cua loss de tan
+cong hieu qua nhat co the (truong hop nguy hiem nhat, lam co so danh gia
+chat che nhat do ben vung cua he thong).
 
-4 chi so do cho moi muc epsilon (Bang 3.6 khoa luan):
-  - ASR (Attack Success Rate): trong so NHUNG NODE ma truoc tan cong model
-    dang doan DUNG, co bao nhieu % sau khi bi tan cong lai doan SAI - do
-    dung muc do "tan cong thanh cong lam hong ket qua dung".
+===================== THUAT TOAN FGSM (Muc 2.4.2) =======================
+    z' = z + epsilon * sign( d(Loss)/dz )
+
+trong do Loss la Cross-Entropy cua bo giai ma (Decoder), epsilon la ngan
+sach nhieu (cang lon cang de bi phat hien nhung cang gay hai). Day la tan
+cong 1-buoc (single-step gradient ascent), khac han nhieu AWGN ngau nhien
+vi no duoc tinh toan CO CHU DICH theo dung huong lam loss tang nhanh nhat.
+
+Kich ban danh gia (Muc 3.4.2): tai 1 muc SNR vat ly on dinh (SNR=10dB,
+dung chung voi SNR_DB da dung luc train o Tuan 6), so sanh 2 truong hop:
+  - "Sach": z chi di qua kenh AWGN binh thuong (SNR=10dB), KHONG bi tan cong.
+  - "Bi tan cong": z BI CHEN THEM nhieu FGSM (z -> z') roi MOI di qua
+    cung kenh AWGN (SNR=10dB) do - vi ke tan cong chi "chen them" nhieu
+    doi khang vao kenh truyen vat ly van dang ton tai san, khong thay the
+    no (Muc 3.4: "kenh truyen bi chen vector tan cong doi khang").
+
+===================== CHI SO DO (Bang 3.6 khoa luan) =====================
+  - ASR (Attack Success Rate), dung DUNG cong thuc da ghi o Muc 3.2.2:
+        ASR = max(0, (Acc_clean - Acc_adv) / Acc_clean)
+    voi Acc_clean la do chinh xac Node Classifier khi KHONG bi tan cong
+    (epsilon = 0, chi co AWGN), Acc_adv la do chinh xac khi BI tan cong
+    FGSM voi ngan sach epsilon tuong ung. Day la cong thuc muc GIAM do
+    chinh xac TOAN CUC, khac voi kieu "dem tung node doi dung->sai" ma
+    ban dau file nay dung nham - da sua lai cho dung.
   - F1-score: F1 (macro) cua Node Classifier SAU khi bi tan cong.
-  - BLEU: so sanh chuoi van ban "tai dung lai" tu bo ba goc va tu bo ba
-    model doan duoc SAU tan cong (tu viet BLEU n-gram don gian, khong
-    can cai them thu vien ngoai).
-  - "BERTScore": do tuong dong ngu nghia can 1 mo hinh ngon ngu rieng;
-    de khong phai cai them goi bert-score (ton dung luong, phai tai model
-    rieng), nhom TAI SU DUNG chinh model MiniLM da co san (dung de nhung
-    cau trong graph_builder.py) de tinh do tuong dong cosine giua 2 cau -
-    ban chat la 1 PHIEN BAN DON GIAN HOA cua BERTScore, ghi ro trong
-    Muc 3.2.2 khoa luan (khong phai BERTScore "chuan" dung BERT-base).
+  - BLEU: so sanh van ban "tai dung lai" tu bo ba goc va tu bo ba model
+    doan duoc SAU tan cong (tu viet BLEU n-gram don gian, khong can cai
+    them thu vien ngoai).
+  - "BERTScore": khoa luan goi la BERTScore nhung de khong phai cai them
+    goi bert-score rieng (phai tai model BERT-base khac, ton dung luong),
+    nhom TAI SU DUNG chinh model MiniLM da co san (dung de nhung cau
+    trong graph_builder.py) de tinh do tuong dong cosine giua 2 cau - la
+    1 PHIEN BAN DON GIAN HOA, can ghi ro trong Muc 3.2.2 khi bao ve.
 
 Chay: python attack.py
 """
@@ -59,7 +70,7 @@ from channel import awgn_channel
 from graph_builder import WebNLGGraphBuilder
 
 CHECKPOINT_PATH = "checkpoints/checkpoint_week6.pt"
-SNR_DB = 10  # muc SNR co dinh khi tan cong, dung chung muc da dung luc train (Muc 2.2.1)
+SNR_DB = 10  # muc SNR vat ly on dinh dung de danh gia tan cong (Muc 3.4.2)
 EPSILONS = [0.01, 0.05, 0.1, 0.15, 0.2]  # ngan sach nhieu doi khang (Bang 3.6 khoa luan)
 
 
@@ -79,27 +90,22 @@ def make_targets(graph, triples, entity_vocab, relation_vocab, device):
     return node_targets, relation_targets
 
 
-def fgsm_perturb(encoder, decoder, graph, node_targets, relation_targets, epsilon):
-    """Tao nhieu doi khang FGSM tren dac trung node tho (graph.x), truoc
-    khi vao Encoder. Tra ve x_adv (da tach khoi do thi tinh toan)."""
-    original_x = graph.x
-    x = original_x.clone().detach().requires_grad_(True)
-    graph.x = x
-
-    z = encoder(graph)
-    z_noisy = awgn_channel(z, SNR_DB)
-    node_logits, relation_logits = decoder(z_noisy)
+def fgsm_perturb_z(decoder, z, node_targets, relation_targets, epsilon):
+    """FGSM dung DUNG Muc 2.4.2: chen nhieu vao z (dau ra Encoder, vector
+    THUC SU duoc truyen tren kenh), khong phai vao dac trung tho truoc
+    Encoder. z phai la tensor da tach khoi do thi tinh toan cua Encoder
+    (de khong vo tinh lan truyen nguoc ca vao trong so Encoder)."""
+    z = z.detach().clone().requires_grad_(True)
+    node_logits, relation_logits = decoder(z)
 
     loss = F.cross_entropy(node_logits, node_targets) + F.cross_entropy(
         relation_logits.reshape(-1, relation_logits.shape[-1]), relation_targets.reshape(-1)
     )
-    encoder.zero_grad(set_to_none=True)
     decoder.zero_grad(set_to_none=True)
     loss.backward()
 
-    x_adv = (x + epsilon * x.grad.sign()).detach()
-    graph.x = original_x  # khoi phuc do thi goc, tranh lam hong du lieu cho vong lap sau
-    return x_adv
+    z_adv = (z + epsilon * z.grad.sign()).detach()
+    return z_adv
 
 
 def reconstruct_triples(node_preds, relation_logits, idx_to_entity, idx_to_relation, none_idx):
@@ -166,14 +172,16 @@ def build_graphs(builder, triples_list):
     return graphs
 
 
-def evaluate_epsilon(encoder, decoder, builder, graphs_with_triples, entity_vocab, relation_vocab,
-                      idx_to_entity, idx_to_relation, epsilon, device):
-    none_idx = len(relation_vocab)
+def run_pass(encoder, decoder, builder, graphs_with_triples, entity_vocab, relation_vocab,
+             idx_to_entity, idx_to_relation, device, epsilon=None):
+    """Chay 1 luot danh gia tren toan bo tap test.
 
-    total_correct_before = 0
-    total_attack_success = 0
-    total_correct_after = 0
-    total_nodes = 0
+    epsilon=None  -> truong hop "sach": z chi qua kenh AWGN, khong tan cong.
+    epsilon=X     -> truong hop "bi tan cong": z bi chen nhieu FGSM (ngan
+                     sach X) TRUOC KHI qua kenh AWGN (Muc 3.4.2).
+    """
+    none_idx = len(relation_vocab)
+    total_correct, total_nodes = 0, 0
     tp, fp, fn = {}, {}, {}
     bleu_scores, sim_scores = [], []
 
@@ -181,48 +189,36 @@ def evaluate_epsilon(encoder, decoder, builder, graphs_with_triples, entity_voca
         graph = graph.to(device)
         node_targets, relation_targets = make_targets(graph, triples, entity_vocab, relation_vocab, device)
 
-        # 1. Du doan TRUOC khi tan cong (lam co so tinh ASR)
         with torch.no_grad():
-            z_clean = encoder(graph)
-            node_logits_clean, _ = decoder(awgn_channel(z_clean, SNR_DB))
-        pred_clean = node_logits_clean.argmax(dim=-1)
+            z = encoder(graph)
 
-        # 2. Tao nhieu doi khang FGSM, roi du doan LAI voi dau vao da bi tan cong
-        x_adv = fgsm_perturb(encoder, decoder, graph, node_targets, relation_targets, epsilon)
-        original_x = graph.x
-        graph.x = x_adv
+        if epsilon is not None:
+            # Ke tan cong chen nhieu FGSM vao z (vector dang truyen), roi
+            # KENH VAT LY (AWGN) van tiep tuc tac dong len z' nhu binh thuong.
+            z = fgsm_perturb_z(decoder, z, node_targets, relation_targets, epsilon)
+
         with torch.no_grad():
-            z_adv = encoder(graph)
-            node_logits_adv, relation_logits_adv = decoder(awgn_channel(z_adv, SNR_DB))
-        graph.x = original_x
-        pred_adv = node_logits_adv.argmax(dim=-1)
+            z_channel = awgn_channel(z, SNR_DB)
+            node_logits, relation_logits = decoder(z_channel)
 
-        # ASR: trong so node TRUOC DOAN DUNG, sau tan cong co bao nhieu % doan SAI
-        correct_before = (pred_clean == node_targets)
-        became_wrong = correct_before & (pred_adv != node_targets)
-        total_correct_before += correct_before.sum().item()
-        total_attack_success += became_wrong.sum().item()
-
-        # Accuracy/F1 SAU tan cong
-        correct_after = (pred_adv == node_targets)
-        total_correct_after += correct_after.sum().item()
+        pred = node_logits.argmax(dim=-1)
+        total_correct += (pred == node_targets).sum().item()
         total_nodes += node_targets.numel()
-        for true_c, pred_c in zip(node_targets.tolist(), pred_adv.tolist()):
+
+        for true_c, pred_c in zip(node_targets.tolist(), pred.tolist()):
             if true_c == pred_c:
                 tp[true_c] = tp.get(true_c, 0) + 1
             else:
                 fn[true_c] = fn.get(true_c, 0) + 1
                 fp[pred_c] = fp.get(pred_c, 0) + 1
 
-        # BLEU / "BERTScore" tren van ban tai dung tu bo ba
         sentence_gt = triples_to_text(triples)
-        pred_triples = reconstruct_triples(pred_adv, relation_logits_adv, idx_to_entity, idx_to_relation, none_idx)
-        sentence_adv = triples_to_text(pred_triples)
-        bleu_scores.append(compute_bleu(sentence_gt, sentence_adv))
-        sim_scores.append(semantic_similarity(builder.embedder, sentence_gt, sentence_adv))
+        pred_triples = reconstruct_triples(pred, relation_logits, idx_to_entity, idx_to_relation, none_idx)
+        sentence_pred = triples_to_text(pred_triples)
+        bleu_scores.append(compute_bleu(sentence_gt, sentence_pred))
+        sim_scores.append(semantic_similarity(builder.embedder, sentence_gt, sentence_pred))
 
-    asr = total_attack_success / max(total_correct_before, 1)
-    accuracy_after = total_correct_after / max(total_nodes, 1)
+    accuracy = total_correct / max(total_nodes, 1)
 
     classes = set(tp) | set(fp) | set(fn)
     f1_list = []
@@ -237,10 +233,7 @@ def evaluate_epsilon(encoder, decoder, builder, graphs_with_triples, entity_voca
     avg_bleu = sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0.0
     avg_sim = sum(sim_scores) / len(sim_scores) if sim_scores else 0.0
 
-    return {
-        "asr": asr, "accuracy_after": accuracy_after, "f1": macro_f1,
-        "bleu": avg_bleu, "bertscore_approx": avg_sim,
-    }
+    return {"accuracy": accuracy, "f1": macro_f1, "bleu": avg_bleu, "bertscore_approx": avg_sim}
 
 
 def main():
@@ -278,18 +271,32 @@ def main():
     test_graphs = build_graphs(builder, test_triples)
     print(f"Dung tap test giu rieng tu luc train: {len(test_graphs)} do thi hop le.\n")
 
+    # Buoc 1: truong hop "sach" (Acc_clean) - chi chay 1 lan, dung lam mau
+    # so cho ca 5 muc epsilon (dung cong thuc ASR o Muc 3.2.2).
+    print("Danh gia truong hop SACH (khong bi tan cong, chi co AWGN)...")
+    clean = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
+                      idx_to_entity, idx_to_relation, device, epsilon=None)
+    acc_clean = clean["accuracy"]
+    print(f"  Acc_clean = {acc_clean * 100:.2f}% | F1 = {clean['f1']:.4f} | "
+          f"BLEU = {clean['bleu']:.4f} | BERTScore(xap xi) = {clean['bertscore_approx']:.4f}\n")
+
     print("Bat dau tan cong FGSM qua cac muc epsilon...")
-    all_results = {"asr": [], "accuracy_after": [], "f1": [], "bleu": [], "bertscore_approx": []}
+    all_results = {"asr": [], "accuracy": [], "f1": [], "bleu": [], "bertscore_approx": []}
     for eps in EPSILONS:
-        r = evaluate_epsilon(
-            encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
-            idx_to_entity, idx_to_relation, eps, device,
-        )
-        for k in all_results:
-            all_results[k].append(r[k])
+        r = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
+                      idx_to_entity, idx_to_relation, device, epsilon=eps)
+        # ASR = max(0, (Acc_clean - Acc_adv) / Acc_clean) - dung cong thuc Muc 3.2.2
+        asr = max(0.0, (acc_clean - r["accuracy"]) / acc_clean) if acc_clean > 0 else 0.0
+
+        all_results["asr"].append(asr)
+        all_results["accuracy"].append(r["accuracy"])
+        all_results["f1"].append(r["f1"])
+        all_results["bleu"].append(r["bleu"])
+        all_results["bertscore_approx"].append(r["bertscore_approx"])
+
         print(
-            f"epsilon = {eps:.2f} | ASR: {r['asr'] * 100:5.2f}% | "
-            f"Accuracy(sau tan cong): {r['accuracy_after'] * 100:5.2f}% | F1: {r['f1']:.4f} | "
+            f"epsilon = {eps:.2f} | ASR: {asr * 100:5.2f}% | "
+            f"Accuracy(sau tan cong): {r['accuracy'] * 100:5.2f}% | F1: {r['f1']:.4f} | "
             f"BLEU: {r['bleu']:.4f} | BERTScore(xap xi): {r['bertscore_approx']:.4f}"
         )
 
@@ -311,7 +318,7 @@ def main():
     axes[1, 1].set_title("\"BERTScore\" xap xi theo epsilon")
     axes[1, 1].set_xlabel("epsilon"); axes[1, 1].set_ylabel("Do tuong dong"); axes[1, 1].grid(True)
 
-    fig.suptitle("Tan cong doi khang FGSM len Semantic Encoder (Tuan 7)")
+    fig.suptitle(f"Tan cong doi khang FGSM vao z tren kenh truyen (SNR={SNR_DB}dB) - Tuan 7")
     fig.tight_layout()
     fig.savefig("fgsm_attack_plot.png")
     print("\nDa chay xong! Da luu bieu do vao file 'fgsm_attack_plot.png'.")
