@@ -1,6 +1,15 @@
 """
-Tuan 7 - Mo hinh de doa (Threat Model) va tan cong doi khang FGSM, DUNG
+Tuan 7-8 - Mo hinh de doa (Threat Model) va tan cong doi khang FGSM, DUNG
 KHOP voi Muc 2.4 / 2.5 / 3.4 da viet san trong khoa luan.
+
+CAP NHAT TUAN 8 (dung nguyen van de cuong): "Thuc nghiem tan cong voi
+nhieu muc cuong do khac nhau; danh gia anh huong cua adversarial attack
+theo SNR, BLEU, BERTScore/Semantic Similarity va Attack Success Rate."
+-> Tuan 7 da lam xong phan "nhieu muc cuong do" (5 muc epsilon) nhung
+CHI o 1 muc SNR co dinh (10dB). Tuan 8 mo rong: chay LAI toan bo phep thu
+o CA 9 muc SNR (giong Bang 3.5, tu -6dB den 18dB) nhan voi 5 muc epsilon
+-> tao ra 1 bang/ma tran 2 chieu (SNR x epsilon), xem tan cong FGSM gay
+hai nhieu hon hay it hon khi kenh truyen tot/xau khac nhau.
 
 ===================== MO HINH DE DOA (THREAT MODEL, Muc 2.4.1) =========
 Ke tan cong dong vai 1 thuc the "dung giua" (Man-in-the-Middle) tren KENH
@@ -70,8 +79,9 @@ from channel import awgn_channel
 from graph_builder import WebNLGGraphBuilder
 
 CHECKPOINT_PATH = "checkpoints/checkpoint_week6.pt"
-SNR_DB = 10  # muc SNR vat ly on dinh dung de danh gia tan cong (Muc 3.4.2)
-EPSILONS = [0.01, 0.05, 0.1, 0.15, 0.2]  # ngan sach nhieu doi khang (Bang 3.6 khoa luan)
+SNR_DB = 10  # muc SNR mac dinh (Bang 3.6 cu, giu lai de tham khao/doi chieu)
+SNR_LEVELS = [-6, -3, 0, 3, 6, 9, 12, 15, 18]  # Tuan 8: dung chung voi Bang 3.5
+EPSILONS = [0.01, 0.05, 0.1, 0.15, 0.2]  # ngan sach nhieu doi khang (Bang 3.6/3.8 khoa luan)
 
 
 def make_targets(graph, triples, entity_vocab, relation_vocab, device):
@@ -173,12 +183,14 @@ def build_graphs(builder, triples_list):
 
 
 def run_pass(encoder, decoder, builder, graphs_with_triples, entity_vocab, relation_vocab,
-             idx_to_entity, idx_to_relation, device, epsilon=None):
+             idx_to_entity, idx_to_relation, device, epsilon=None, snr_db=SNR_DB):
     """Chay 1 luot danh gia tren toan bo tap test.
 
     epsilon=None  -> truong hop "sach": z chi qua kenh AWGN, khong tan cong.
     epsilon=X     -> truong hop "bi tan cong": z bi chen nhieu FGSM (ngan
                      sach X) TRUOC KHI qua kenh AWGN (Muc 3.4.2).
+    snr_db        -> muc SNR vat ly cua kenh truyen AWGN luc do (Tuan 8:
+                     quet qua nhieu muc, giong Bang 3.5, thay vi co dinh).
     """
     none_idx = len(relation_vocab)
     total_correct, total_nodes = 0, 0
@@ -198,7 +210,7 @@ def run_pass(encoder, decoder, builder, graphs_with_triples, entity_vocab, relat
             z = fgsm_perturb_z(decoder, z, node_targets, relation_targets, epsilon)
 
         with torch.no_grad():
-            z_channel = awgn_channel(z, SNR_DB)
+            z_channel = awgn_channel(z, snr_db)
             node_logits, relation_logits = decoder(z_channel)
 
         pred = node_logits.argmax(dim=-1)
@@ -271,66 +283,98 @@ def main():
     test_graphs = build_graphs(builder, test_triples)
     print(f"Dung tap test giu rieng tu luc train: {len(test_graphs)} do thi hop le.\n")
 
-    # Buoc 1: truong hop "sach" (Acc_clean) - chi chay 1 lan, dung lam mau
-    # so cho ca 5 muc epsilon (dung cong thuc ASR o Muc 3.2.2).
-    print("Danh gia truong hop SACH (khong bi tan cong, chi co AWGN)...")
-    clean = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
-                      idx_to_entity, idx_to_relation, device, epsilon=None)
-    acc_clean = clean["accuracy"]
-    print(f"  Acc_clean = {acc_clean * 100:.2f}% | F1 = {clean['f1']:.4f} | "
-          f"BLEU = {clean['bleu']:.4f} | BERTScore(xap xi) = {clean['bertscore_approx']:.4f}\n")
+    # Tuan 8: quet CA 9 muc SNR (giong Bang 3.5) NHAN voi 5 muc epsilon.
+    # Voi MOI muc SNR: chay "sach" 1 lan de lay Acc_clean RIENG cho muc SNR
+    # do (vi kenh xau/tot khac nhau thi Acc_clean cung khac nhau), roi moi
+    # tinh ASR cua tung epsilon SO VOI dung Acc_clean cua muc SNR do.
+    # -> ma tran ket qua 2 chieu: SNR_LEVELS x EPSILONS.
+    results = {}  # results[snr][eps] = {"asr", "accuracy", "f1", "bleu", "bertscore_approx"}
+    acc_clean_per_snr = {}
 
-    print("Bat dau tan cong FGSM qua cac muc epsilon...")
-    all_results = {"asr": [], "accuracy": [], "f1": [], "bleu": [], "bertscore_approx": []}
-    for eps in EPSILONS:
-        r = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
-                      idx_to_entity, idx_to_relation, device, epsilon=eps)
-        # ASR = max(0, (Acc_clean - Acc_adv) / Acc_clean) - dung cong thuc Muc 3.2.2
-        asr = max(0.0, (acc_clean - r["accuracy"]) / acc_clean) if acc_clean > 0 else 0.0
+    for snr in SNR_LEVELS:
+        print(f"\n=== SNR = {snr} dB ===")
+        clean = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
+                          idx_to_entity, idx_to_relation, device, epsilon=None, snr_db=snr)
+        acc_clean = clean["accuracy"]
+        acc_clean_per_snr[snr] = acc_clean
+        print(f"  Acc_clean(SNR={snr}dB) = {acc_clean * 100:.2f}% | F1 = {clean['f1']:.4f} | "
+              f"BLEU = {clean['bleu']:.4f} | BERTScore(xap xi) = {clean['bertscore_approx']:.4f}")
 
-        all_results["asr"].append(asr)
-        all_results["accuracy"].append(r["accuracy"])
-        all_results["f1"].append(r["f1"])
-        all_results["bleu"].append(r["bleu"])
-        all_results["bertscore_approx"].append(r["bertscore_approx"])
+        results[snr] = {}
+        for eps in EPSILONS:
+            r = run_pass(encoder, decoder, builder, test_graphs, entity_vocab, relation_vocab,
+                          idx_to_entity, idx_to_relation, device, epsilon=eps, snr_db=snr)
+            # ASR = max(0, (Acc_clean - Acc_adv) / Acc_clean) - Muc 3.2.2, nhung
+            # gio Acc_clean la cua DUNG muc SNR nay, khong phai muc SNR=10dB co dinh.
+            asr = max(0.0, (acc_clean - r["accuracy"]) / acc_clean) if acc_clean > 0 else 0.0
+            results[snr][eps] = {
+                "asr": asr, "accuracy": r["accuracy"], "f1": r["f1"],
+                "bleu": r["bleu"], "bertscore_approx": r["bertscore_approx"],
+            }
+            print(
+                f"    epsilon={eps:.2f} | ASR: {asr * 100:5.2f}% | "
+                f"Accuracy: {r['accuracy'] * 100:5.2f}% | F1: {r['f1']:.4f} | "
+                f"BLEU: {r['bleu']:.4f} | BERTScore(xap xi): {r['bertscore_approx']:.4f}"
+            )
 
-        print(
-            f"epsilon = {eps:.2f} | ASR: {asr * 100:5.2f}% | "
-            f"Accuracy(sau tan cong): {r['accuracy'] * 100:5.2f}% | F1: {r['f1']:.4f} | "
-            f"BLEU: {r['bleu']:.4f} | BERTScore(xap xi): {r['bertscore_approx']:.4f}"
-        )
+    # ==================== Bang tong hop dang ma tran (Tuan 8) ====================
+    print("\n\n==== Bang 3.8 (de xuat) - ASR(%) theo SNR (hang) x epsilon (cot) ====")
+    header = "SNR\\eps".rjust(8) + "".join(f"{eps:>9.2f}" for eps in EPSILONS)
+    print(header)
+    for snr in SNR_LEVELS:
+        row = f"{snr:>8}" + "".join(f"{results[snr][eps]['asr'] * 100:9.2f}" for eps in EPSILONS)
+        print(row)
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+    print("\n==== Bang chi tiet day du (ASR/Accuracy/F1/BLEU/BERTScore moi cap SNR-epsilon) ====")
+    print(f"{'SNR':>5} | {'epsilon':>7} | {'ASR':>7} | {'Accuracy':>9} | {'F1':>7} | {'BLEU':>7} | {'BERTScore':>10}")
+    for snr in SNR_LEVELS:
+        for eps in EPSILONS:
+            r = results[snr][eps]
+            print(
+                f"{snr:>5} | {eps:>7.2f} | {r['asr'] * 100:6.2f}% | {r['accuracy'] * 100:8.2f}% | "
+                f"{r['f1']:7.4f} | {r['bleu']:7.4f} | {r['bertscore_approx']:10.4f}"
+            )
 
-    axes[0, 0].plot(EPSILONS, [a * 100 for a in all_results["asr"]], marker="o", color="r")
-    axes[0, 0].set_title("ASR (Ty le tan cong thanh cong) theo epsilon")
-    axes[0, 0].set_xlabel("epsilon"); axes[0, 0].set_ylabel("ASR (%)"); axes[0, 0].grid(True)
+    # ==================== Bieu do ====================
+    cmap = plt.get_cmap("viridis")
+    colors = [cmap(i / max(len(SNR_LEVELS) - 1, 1)) for i in range(len(SNR_LEVELS))]
 
-    axes[0, 1].plot(EPSILONS, all_results["f1"], marker="o", color="m")
-    axes[0, 1].set_title("F1-score (sau tan cong) theo epsilon")
-    axes[0, 1].set_xlabel("epsilon"); axes[0, 1].set_ylabel("F1"); axes[0, 1].grid(True)
-
-    axes[1, 0].plot(EPSILONS, all_results["bleu"], marker="o", color="b")
-    axes[1, 0].set_title("BLEU theo epsilon")
-    axes[1, 0].set_xlabel("epsilon"); axes[1, 0].set_ylabel("BLEU"); axes[1, 0].grid(True)
-
-    axes[1, 1].plot(EPSILONS, all_results["bertscore_approx"], marker="o", color="g")
-    axes[1, 1].set_title("\"BERTScore\" xap xi theo epsilon")
-    axes[1, 1].set_xlabel("epsilon"); axes[1, 1].set_ylabel("Do tuong dong"); axes[1, 1].grid(True)
-
-    fig.suptitle(f"Tan cong doi khang FGSM vao z tren kenh truyen (SNR={SNR_DB}dB) - Tuan 7")
+    fig, axes = plt.subplots(2, 2, figsize=(13, 10))
+    metric_axes = [
+        ("asr", axes[0, 0], "ASR (Ty le tan cong thanh cong) theo epsilon, tung muc SNR", "ASR (%)", 100),
+        ("f1", axes[0, 1], "F1-score (sau tan cong) theo epsilon, tung muc SNR", "F1", 1),
+        ("bleu", axes[1, 0], "BLEU theo epsilon, tung muc SNR", "BLEU", 1),
+        ("bertscore_approx", axes[1, 1], "\"BERTScore\" xap xi theo epsilon, tung muc SNR", "Do tuong dong", 1),
+    ]
+    for key, ax, title, ylabel, scale in metric_axes:
+        for i, snr in enumerate(SNR_LEVELS):
+            ys = [results[snr][eps][key] * scale for eps in EPSILONS]
+            ax.plot(EPSILONS, ys, marker="o", color=colors[i], label=f"{snr}dB")
+        ax.set_title(title)
+        ax.set_xlabel("epsilon")
+        ax.set_ylabel(ylabel)
+        ax.grid(True)
+    axes[0, 0].legend(title="SNR", fontsize=7, ncol=2)
+    fig.suptitle("Tan cong doi khang FGSM vao z, quet qua nhieu muc SNR - Tuan 8")
     fig.tight_layout()
     fig.savefig("fgsm_attack_plot.png")
-    print("\nDa chay xong! Da luu bieu do vao file 'fgsm_attack_plot.png'.")
+    print("\nDa luu bieu do duong (4 chi so x nhieu muc SNR) vao 'fgsm_attack_plot.png'.")
 
-    print("\n==== Bang tong hop (dien vao Bang 3.6 khoa luan) ====")
-    print(f"{'epsilon':>8} | {'ASR':>8} | {'BLEU':>8} | {'BERTScore':>10} | {'F1-score':>9}")
-    for i, eps in enumerate(EPSILONS):
-        print(
-            f"{eps:>8.2f} | {all_results['asr'][i] * 100:6.2f}% | "
-            f"{all_results['bleu'][i]:8.4f} | {all_results['bertscore_approx'][i]:10.4f} | "
-            f"{all_results['f1'][i]:9.4f}"
-        )
+    # Heatmap rieng cho ASR - de nhin ngay vung "nguy hiem nhat" (SNR thap + epsilon cao)
+    asr_matrix = [[results[snr][eps]["asr"] * 100 for eps in EPSILONS] for snr in SNR_LEVELS]
+    fig2, ax2 = plt.subplots(figsize=(7, 6))
+    im = ax2.imshow(asr_matrix, cmap="Reds", aspect="auto")
+    ax2.set_xticks(range(len(EPSILONS))); ax2.set_xticklabels([f"{e:.2f}" for e in EPSILONS])
+    ax2.set_yticks(range(len(SNR_LEVELS))); ax2.set_yticklabels([f"{s}dB" for s in SNR_LEVELS])
+    ax2.set_xlabel("epsilon"); ax2.set_ylabel("SNR")
+    ax2.set_title("ASR (%) theo SNR x epsilon")
+    for i in range(len(SNR_LEVELS)):
+        for j in range(len(EPSILONS)):
+            ax2.text(j, i, f"{asr_matrix[i][j]:.1f}", ha="center", va="center", fontsize=8)
+    fig2.colorbar(im, ax=ax2, label="ASR (%)")
+    fig2.tight_layout()
+    fig2.savefig("fgsm_attack_heatmap.png")
+    print("Da luu heatmap ASR (SNR x epsilon) vao 'fgsm_attack_heatmap.png'.")
 
 
 if __name__ == "__main__":
