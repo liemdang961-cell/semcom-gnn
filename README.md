@@ -147,6 +147,14 @@ python evaluate_channels.py --checkpoint checkpoints/checkpoint_rayleigh.pt
 - Kết quả: bảng Accuracy/F1 hai kênh theo SNR, `results_channels_<tên>.json`, `channel_accuracy_comparison_<tên>.png`.
 - Dùng để: cho thấy kênh nào khó hơn; điền bảng so sánh hai kênh.
 
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("channel_accuracy_comparison_checkpoint_week6.png"))
+# checkpoint khác: đổi tên file thành channel_accuracy_comparison_<tên checkpoint không có .pt>.png
+```
+
 #### `train_channel.py` - Huấn luyện qua kênh tùy chọn
 
 ```bash
@@ -173,6 +181,14 @@ python compare_secom_channels.py
 - Kết quả: bảng so sánh in ra màn hình, `results_secom_channels.json`, `secom_channels_accuracy.png`, `secom_channels_f1.png`.
 - Kỳ vọng: SNR cao thì các mô hình gần bằng nhau; SNR thấp thì GNN thường tụt mạnh hơn GNN + SeCom. Đây chỉ là kỳ vọng, số liệu thật mới là kết luận.
 
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("secom_channels_accuracy.png"))
+display(Image("secom_channels_f1.png"))
+```
+
 #### `attack_channel.py` - Tấn công FGSM qua kênh đã chọn
 
 Giống `attack.py` (chèn nhiễu FGSM vào vector `z` đang truyền, kịch bản white-box) nhưng `z` đi qua kênh được chọn. Quét 9 mức SNR × 5 mức ε.
@@ -185,6 +201,15 @@ python attack_channel.py --channel rayleigh --checkpoint checkpoints/checkpoint_
 - Cần: `checkpoint_rayleigh.pt` (hoặc `--checkpoint` khác). Mặc định kênh `awgn` dùng `checkpoint_week6.pt`.
 - Kết quả: ma trận ASR theo SNR × ε, bảng chi tiết (ASR/Accuracy/F1/BLEU/BERTScore), `results_attack_<kênh>.json`, `fgsm_attack_plot_<kênh>.png`, `fgsm_attack_heatmap_<kênh>.png`.
 - Dùng để: thay Bảng 3.6, 3.9 và Hình 3.5 cho kênh mới.
+
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("fgsm_attack_plot_rayleigh.png"))
+display(Image("fgsm_attack_heatmap_rayleigh.png"))
+# kênh AWGN: đổi rayleigh thành awgn
+```
 
 #### `train_adversarial_channel.py` - Huấn luyện đối kháng qua kênh đã chọn
 
@@ -210,11 +235,87 @@ python compare_defense_channel.py --channel rayleigh --snrs 10 -6
 - Kết quả: bảng ASR(%) trước/sau phòng vệ theo ε, `results_defense_<kênh>.json`, `defense_comparison_<kênh>_snr<SNR>.png`.
 - Dùng để: thay Bảng 3.7, 3.8 cho kênh mới.
 
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("defense_comparison_rayleigh_snr10.png"))
+display(Image("defense_comparison_rayleigh_snr-6.png"))
+```
+
 ### Ghi chú về cách làm (để trả lời khi bảo vệ)
 
 - Kẻ tấn công vẫn là white-box: biết Encoder/Decoder nhưng không biết hệ số fading `H` của từng lần truyền.
 - File gốc (AWGN) và file mở rộng cho cùng thuật toán tấn công và huấn luyện; chỉ khác kênh.
 - Checkpoint cũ không bị ghi đè; số liệu AWGN cũ dùng lại làm cột đối chiếu.
+
+---
+
+## Chạy từng ô trên Google Colab (có hiển thị ảnh ngay sau mỗi bước)
+
+Mỗi mục dưới đây là **một ô code** của Colab. Chạy lần lượt từ trên xuống. Các ô có `display(Image(...))` sẽ hiện biểu đồ ngay dưới ô, không cần mở file thủ công.
+
+**Ô 0 - Cài đặt (một lần mỗi phiên):**
+```python
+!git clone https://github.com/liemdang961-cell/semcom-gnn.git
+%cd semcom-gnn
+!pip install -r requirements.txt -q
+from IPython.display import Image, display
+```
+
+**Ô 1 - Huấn luyện GNN thường (sạch, không nhiễu):**
+```python
+!python train_channel.py --channel none
+!ls -lh checkpoints/
+```
+
+**Ô 2 - Huấn luyện GNN + SeCom qua Rayleigh:**
+```python
+!python train_channel.py --channel rayleigh
+!ls -lh checkpoints/
+```
+
+**Ô 3 - Đo checkpoint cũ qua hai kênh (tùy chọn) + xem ảnh:**
+```python
+!python evaluate_channels.py
+display(Image("channel_accuracy_comparison_checkpoint_week6.png"))
+```
+
+**Ô 4 - So sánh GNN thường với GNN + SeCom qua hai kênh + xem ảnh:**
+```python
+!python compare_secom_channels.py
+display(Image("secom_channels_accuracy.png"))
+display(Image("secom_channels_f1.png"))
+```
+
+**Ô 5 - Tấn công FGSM qua Rayleigh + xem ảnh** (đổi `rayleigh` thành `awgn` nếu AWGN là kênh mạnh nhất):
+```python
+!python attack_channel.py --channel rayleigh
+display(Image("fgsm_attack_plot_rayleigh.png"))
+display(Image("fgsm_attack_heatmap_rayleigh.png"))
+```
+
+**Ô 6 - Huấn luyện đối kháng qua Rayleigh** (lâu nhất, chạy sau cùng):
+```python
+!python train_adversarial_channel.py --channel rayleigh
+!ls -lh checkpoints/
+```
+
+**Ô 7 - So sánh trước/sau phòng vệ + xem ảnh:**
+```python
+!python compare_defense_channel.py --channel rayleigh --snrs 10 -6
+display(Image("defense_comparison_rayleigh_snr10.png"))
+display(Image("defense_comparison_rayleigh_snr-6.png"))
+```
+
+**Ô 8 - Tải kết quả về máy (làm sau mỗi bước quan trọng, vì Colab ngắt phiên là mất file):**
+```python
+!zip -q -r ket_qua.zip checkpoints results_*.json *.png
+from google.colab import files
+files.download("ket_qua.zip")
+```
+
+Nếu muốn xem lại ảnh bất kỳ, chạy `display(Image("tên_file.png"))`. Ảnh nằm ở thư mục `semcom-gnn` (ô `ls` để xem danh sách).
 
 ---
 
@@ -239,6 +340,13 @@ python evaluate.py
 
 - Cần `checkpoint_week6.pt`. In bảng Accuracy/F1/PSNR/SSIM theo 9 mức SNR và lưu `snr_evaluation_plot.png`.
 
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("snr_evaluation_plot.png"))
+```
+
 ### 3. `attack.py` - Tấn công FGSM (Bảng 3.6, 3.9)
 
 ```bash
@@ -246,6 +354,14 @@ python attack.py
 ```
 
 - Cần `checkpoint_week6.pt`. Ra ma trận ASR, bảng chi tiết, `fgsm_attack_plot.png` và `fgsm_attack_heatmap.png`.
+
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("fgsm_attack_plot.png"))
+display(Image("fgsm_attack_heatmap.png"))
+```
 
 ### 4. `train_adversarial.py` - Phòng vệ Adversarial Training (Tuần 9)
 
@@ -263,9 +379,29 @@ python compare_defense.py
 
 - Cần `checkpoint_week6.pt` và `checkpoint_week9.pt`. Ra bảng ASR(%) theo ε và `defense_comparison_plot.png`.
 
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("defense_comparison_plot.png"))
+```
+
 ### 6. `compare_secom.py` - Bản so sánh cũ (đã được thay)
 
 Bản cũ coi "chưa SeCom" là không qua kênh (lý tưởng). Cô nhận xét cách này chưa đúng vì GNN cũng phải đi qua kênh truyền, nên dùng `compare_secom_channels.py` ở mục "Phần mở rộng". File này giữ lại để đối chiếu.
+
+```bash
+python compare_secom.py
+```
+
+- Cần `checkpoint_week6.pt`. Ra bảng Accuracy/F1 và `secom_comparison_plot.png`.
+
+Xem ảnh trên Colab (copy nguyên ô):
+
+```python
+from IPython.display import Image, display
+display(Image("secom_comparison_plot.png"))
+```
 
 ### 7. `gradio_app.py` - Giao diện demo
 
