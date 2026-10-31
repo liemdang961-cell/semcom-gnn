@@ -83,6 +83,8 @@ SNR_DB = 10  # muc SNR mac dinh (Bang 3.6 cu, giu lai de tham khao/doi chieu)
 SNR_LEVELS = [-6, -3, 0, 3, 6, 9, 12, 15, 18]  # Tuan 8: dung chung voi Bang 3.5
 EPSILONS = [0.01, 0.05, 0.1, 0.15, 0.2]  # ngan sach nhieu doi khang (Bang 3.6/3.8 khoa luan)
 
+SEED = 42
+
 
 def make_targets(graph, triples, entity_vocab, relation_vocab, device):
     """Giong make_targets() trong train.py - tao nhan dung cho 1 do thi."""
@@ -192,6 +194,11 @@ def run_pass(encoder, decoder, builder, graphs_with_triples, entity_vocab, relat
     snr_db        -> muc SNR vat ly cua kenh truyen AWGN luc do (Tuan 8:
                      quet qua nhieu muc, giong Bang 3.5, thay vi co dinh).
     """
+    # SUA LOI: phai tat dropout khi do (truoc day thieu .eval() nen accuracy sach bi thap va
+    # moi lan chay moi khac). Seed co dinh de cung chuoi nhieu giua cac lan chay/checkpoint.
+    encoder.eval()
+    decoder.eval()
+    torch.manual_seed(SEED)
     none_idx = len(relation_vocab)
     total_correct, total_nodes = 0, 0
     tp, fp, fn = {}, {}, {}
@@ -224,7 +231,7 @@ def run_pass(encoder, decoder, builder, graphs_with_triples, entity_vocab, relat
                 fn[true_c] = fn.get(true_c, 0) + 1
                 fp[pred_c] = fp.get(pred_c, 0) + 1
 
-        sentence_gt = triples_to_text(triples)
+        sentence_gt = triples_to_text([tuple(WebNLGGraphBuilder._clean(x) for x in t) for t in triples])  # lam sach giong cau du doan
         pred_triples = reconstruct_triples(pred, relation_logits, idx_to_entity, idx_to_relation, none_idx)
         sentence_pred = triples_to_text(pred_triples)
         bleu_scores.append(compute_bleu(sentence_gt, sentence_pred))
